@@ -120,15 +120,15 @@ int main() {
     //해시 테이블 기반으로 실제 값 비교
     for (const string& read : reads) {
         bool found = false;
-        for (int i = 0; i < 10; i++) {
-            string sub = read.substr(i * 10, 10);
+        for (int i = 0; i < patternLength; i++) {
+            string sub = read.substr(i * patternLength, patternLength);
             int hash = 0, D = 1;
-            for (int j = 0; j < 9; j++) D = (D * d) % q;
-            for (int j = 0; j < 10; j++) hash = (d * hash + sub[j]) % q;
+            for (int j = 0; j < patternLength - 1; j++) D = (D * d) % q;
+            for (int j = 0; j < patternLength; j++) hash = (d * hash + sub[j]) % q;
 
             if (hashTable.find(hash) != hashTable.end()) {
                 for (int idx : hashTable[hash]) {
-                    int start = idx - i * 10;
+                    int start = idx - i * patternLength;
                     if (start < 0 || start + 100 > sequence.size()) continue;
 
                     string candidate = sequence.substr(start, 100);
