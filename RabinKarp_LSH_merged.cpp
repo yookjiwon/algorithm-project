@@ -110,34 +110,6 @@ int countError(const string& subSequence, const string& subRead) {
  배열크기 크게 늘려보고 리드가 있나 없나만 판단하는거 아닌가 ?
  */
 
-struct Bloom {
-    vector<bool> bitset; // 추적
-    int size, hash_num;
-
-    Bloom(size_t n, int k=3) : size(n), hash_num(k), bitset(n, false) {}
-
-    size_t hash(const string &s, int seed) const {
-        size_t h = seed;
-        for (char c : s) h = h*101 + c;
-        return h % size;
-    }
-    
-    //  미리 BloomFilter에 미리 저장해놓고. 000.add(seed)
-    void add(const string &s) {
-        for (int i=0; i<hash_num; ++i) bitset[hash(s, i)] = true;
-    }
-    
-    //read의 seed를 검사한다.
-    bool possibly_contains(const string &s) const {
-        for (int i=0; i<hash_num; ++i)
-            //없을 경우 "!bitset[hash(s, i)]" false 후 skip
-            if (!bitset[hash(s, i)]) return false;
-        //있다면 후보군으로 올리기
-        return true;
-    }
-};
-
-// 개선된 블룸 필터
 struct FastBloom {
     vector<uint64_t> bits;
     size_t size, hash_num;
@@ -201,198 +173,186 @@ size_t lsh_hash(const string &s, int lsh_bit=10) {
 
 // main
 int main() {
-    // ---- [1] 기본 read/해시테이블 구조 ----
-    //절대경로
+    
+    vector<string> result_buf; // 결과를 임시로 저장할 버퍼
+    
     string inputFile = "/Users/kosora/Documents/Xcode/C++/AlgorithmProject/AlgorithmProject/Homo_sapiens.GRCh38.dna.alt.fa";
-//    string inputFile = "/Users/kosora/Documents/Xcode/C++/AlgorithmProject/AlgorithmProject/smallinput.txt";
-    string outputFile = "hash_table.txt";
-    string readFile = "/Users/kosora/Documents/Xcode/C++/AlgorithmProject/AlgorithmProject/smallread.txt"; //read 목록파일
-
+    string readFile = "/Users/kosora/Documents/Xcode/C++/AlgorithmProject/AlgorithmProject/smallread.txt";
     string sequence = readSequence(inputFile);
-    unordered_map<int, vector<int>> hashTable = buildHashTable(sequence, patternLength);
-    cout << "Rabin-Karp 기반 해시테이블 Build 완료!\n";
-    
-    saveHashTable(hashTable, outputFile);
-    cout << "해시테이블 파일 저장 완료!\n";
-
     vector<string> reads = readReads(readFile);
-    unordered_map<int, vector<int>> resultTable;
-    int readIdx = 0;
 
-    // ---- [2] 확장 파트: BloomFilter+LSH+BandDP 기반 후보군 탐색 ----
-    cout << "Bloom+LSH 후보군 기반 추가탐색...\n";
-    int k = 15; // seed 길이
-    int lsh_bit = 10;
-    int D = error;
-
-    // Bloom filter 구버전
-//    int bloom_size = 1000000;
-//    Bloom bf(bloom_size, 4);
-    
-    // Bloom filter 신버전 -> size 최적화 설정
+    // Bloom+LSH+BandDP 초기화
+    int k = 15, lsh_bit = 10, D = error;
     size_t bloom_size = estimate_bloom_size(sequence.size(), 0.02);
     int hash_num = recommend_hash_num(bloom_size, sequence.size());
     FastBloom bf(bloom_size, hash_num);
-
-    // Bloom Filter 삽입
-    for (size_t i=0; i+ k <= sequence.size(); ++i) {
+    for (size_t i=0; i + k <= sequence.size(); ++i)
         bf.add(sequence.substr(i, k));
-    }
-    
-    // Reference의 모든 seed(부분문자열)를 LSH bucket에 저장
-    /*
-     LSH 설명 (부족하면 말씀해주세요) -> 유사한 seed들 후보 압축해서 시간 단축.
-     seed 해시값의 상위 몇 비트만 “bucket(버킷)”에 저장하여, 비슷한 k-mer(seed)들이 같은 bucket에 모으기
-     모든 seed를 hash→bucket에 위치 저장
-     (예: lsh_table[버킷] = {seq위치1, seq위치2, ...})
-     */
-    
-    // Reference의 모든 seed(부분문자열)를 LSH bucket에 저장
     unordered_map<size_t, vector<size_t>> lsh_table;
-    for (size_t i=0; i+k <= sequence.size(); ++i) {
+    for (size_t i=0; i + k <= sequence.size(); ++i) {
         string seed = sequence.substr(i, k);
         size_t bkt = lsh_hash(seed, lsh_bit);
-        // (최대 후보군을 너무 늘리지 않게, 한 bucket당 100개까지만 저장)
         if (lsh_table[bkt].size()<100)
             lsh_table[bkt].push_back(i);
     }
-    
-    // 결과 파일 미리 open -> 파일형태로 출력
-    ofstream file("result.txt");
-    
-    // ---- [3] 기존 read마다 Rabin-Karp 검색 + [확장] Bloom/LSH/BandDP 비교 ----
+
+    int readIdx = 0;
     for (const string& read : reads) {
-        // 방어: 길이 k보다 짧으면 바로 skip!
-        if (read.size() < k) {
-            ++readIdx;
-            continue;
-        }
+        if (read.size() < k) { ++readIdx; continue; }
+        // Bloom+LSH+BandDP만 사용
         bool found = false;
-
-        // --- 기존 해시테이블 기반 탐색 ---
-        for (int i = 0; i < 10; i++) {
-            if (i*10 + 10 >= read.size()) continue; //size() failed: string index out of bounds 오류해결
-            string sub = read.substr(i * 10, 10);
-            int hash = 0, Dval = 1;
-            for (int j = 0; j < 9; j++) Dval = (Dval * d) % q;
-            for (int j = 0; j < 10; j++) hash = (d * hash + sub[j]) % q;
-
-            if (hashTable.find(hash) != hashTable.end()) {
-                for (int idx : hashTable[hash]) {
-                    int start = idx - i * 10;
-                    if (start < 0 || start + 100 > sequence.size()) continue;
-
-                    string candidate = sequence.substr(start, 100);
-                    if (countError(read, candidate) != -1) {
-                        resultTable[readIdx].push_back(start);
-                        found = true;
-                    }
+        for (int j=0; j + k <= read.size(); ++j) {
+            string seed = read.substr(j, k);
+            if (!bf.possibly_contains(seed)) continue;
+            size_t bkt = lsh_hash(seed, lsh_bit);
+            if (lsh_table.find(bkt) == lsh_table.end()) continue;
+            for (size_t refpos : lsh_table[bkt]) {
+                if (refpos + read.size() > sequence.size()) continue;
+                string refseg = sequence.substr(refpos, read.size());
+                int edist = banded_edit_distance(read, refseg, D);
+                if (edist <= D) {
+                    result_buf.push_back(
+                        "확장: read#" + to_string(readIdx) + " (" +
+                        read.substr(0,15) + "...) @Pos " + to_string(refpos) +
+                        " 오차개수=" + to_string(edist) + "\n"
+                    );
+                    found = true;
+                    break;
                 }
             }
             if(found) break;
         }
-
-        // --- Bloom+LSH+BandDP 기반 탐색 ----
-        // Read의 각 seed를 LSH bucket에 해싱해서 후보군 추출
-        if (!found) {
-            for (int j=0; j+k<=read.size(); ++j) { //out of bound 오류 해결
-                string seed = read.substr(j, k);
-                if (!bf.possibly_contains(seed)) continue; // 블룸필터 1차 탈라
-                size_t bkt = lsh_hash(seed, lsh_bit);
-                if (lsh_table.find(bkt) == lsh_table.end()) continue;
-                for (size_t refpos : lsh_table[bkt]) {
-                    if (refpos + read.size() > sequence.size()) continue;
-                    string refseg = sequence.substr(refpos, read.size());
-                    int edist = banded_edit_distance(read, refseg, D); // BandDP 적용
-                    if (edist <= D) {
-                        // 결과를 오직 파일로만 출력
-                        file << "확장: read#" << readIdx << " (" << read.substr(0,15) << "...)"
-                             << " @Pos " << refpos << " 오차개수 =" << edist << "\n";
-                        found = true;
-                        resultTable[readIdx].push_back(refpos);
-                        break;
-                    }
-                }
-                if(found) break;
-            }
-        }
         readIdx++;
     }
-
+    ofstream file("result.txt");
+    for (const string& line : result_buf) file << line;
     file.close();
-    cout << "전체 프로세스 완료!\n";
     
+    cout << "전체 프로세스 완료!\n";
     return 0;
 }
 
-/* int main() {
- // ---- [1] 기본 read/해시테이블 구조 ----
- string inputFile = "/Users/kosora/Documents/Xcode/C++/AlgorithmProject/AlgorithmProject/Homo_sapiens.GRCh38.dna.alt.fa";
- string outputFile = "hash_table.txt";
- string readFile = "/Users/kosora/Documents/Xcode/C++/AlgorithmProject/AlgorithmProject/smallread.txt"; //read 목록파일
-
- string sequence = readSequence(inputFile);
- unordered_map<int, vector<int>> hashTable = buildHashTable(sequence, patternLength);
- cout << "Rabin-Karp 기반 해시테이블 Build 완료!\n";
- saveHashTable(hashTable, outputFile);
- cout << "해시테이블 파일 저장 완료!\n";
-
- vector<string> reads = readReads(readFile);
- unordered_map<int, vector<int>> resultTable;
- int readIdx = 0;
-
- // ---- [2] LSH+BandDP 기반 후보군 탐색 (BloomFilter 사용 X) ----
- cout << "LSH+BandDP 기반 추가탐색...\n";
- int k = 15;
- int lsh_bit = 10;
- int D = error;
-
- // Reference의 모든 seed(부분문자열)를 LSH bucket에 저장
- unordered_map<size_t, vector<size_t>> lsh_table;
- for (size_t i=0; i+k <= sequence.size(); ++i) {
-     string seed = sequence.substr(i, k);
-     size_t bkt = lsh_hash(seed, lsh_bit);
-     if (lsh_table[bkt].size()<100)
-         lsh_table[bkt].push_back(i);
- }
-
- ofstream file("result.txt"); // 결과를 파일로만 출력
-
- // ---- [3] 기존 read마다 Rabin-Karp 검색 + [확장] LSH+BandDP ----
- for (const string& read : reads) {
-     // 방어: 길이 k 보다 짦으면 스킵
-     if (read.size() < k) {
-         ++readIdx;
-         continue;
-     }
-     bool found = false;
-
-
-     // --- LSH+BandDP 기반 탐색 (BloomFilter 사용 X) ---
-     for (int j=0; j+k<=read.size(); ++j) {
-         string seed = read.substr(j, k);
-         size_t bkt = lsh_hash(seed, lsh_bit);
-         if (lsh_table.find(bkt) == lsh_table.end()) continue;
-         for (size_t refpos : lsh_table[bkt]) {
-             if (refpos + read.size() > sequence.size()) continue;
-             string refseg = sequence.substr(refpos, read.size());
-             int edist = banded_edit_distance(read, refseg, D);
-             if (edist <= D) {
-                 // 결과를 파일로만 저장
-                 file << "확장: read#" << readIdx << " (" << read.substr(0,15) << "...)"
-                      << " @Pos " << refpos << " EditDist=" << edist << "\n";
-                 found = true;
-                 resultTable[readIdx].push_back(refpos);
-                 break;
-             }
-         }
-         if(found) break;
-     }
-     readIdx++;
- }
-
- file.close();
- cout << "전체 프로세스 완료!\n";
- return 0;
-}
- */
+//int main() {
+//    // ---- [1] 기본 read/해시테이블 구조 ----
+//    //절대경로
+//    string inputFile = "/Users/kosora/Documents/Xcode/C++/AlgorithmProject/AlgorithmProject/Homo_sapiens.GRCh38.dna.alt.fa";
+////    string inputFile = "/Users/kosora/Documents/Xcode/C++/AlgorithmProject/AlgorithmProject/smallinput.txt";
+//    string outputFile = "hash_table.txt";
+//    string readFile = "/Users/kosora/Documents/Xcode/C++/AlgorithmProject/AlgorithmProject/smallread.txt"; //read 목록파일
+//
+//    string sequence = readSequence(inputFile);
+//    unordered_map<int, vector<int>> hashTable = buildHashTable(sequence, patternLength);
+//    cout << "Rabin-Karp 기반 해시테이블 Build 완료!\n";
+//    
+//    saveHashTable(hashTable, outputFile);
+//    cout << "해시테이블 파일 저장 완료!\n";
+//
+//    vector<string> reads = readReads(readFile);
+//    unordered_map<int, vector<int>> resultTable;
+//    int readIdx = 0;
+//
+//    // ---- [2] 확장 파트: BloomFilter+LSH+BandDP 기반 후보군 탐색 ----
+//    cout << "Bloom+LSH 후보군 기반 추가탐색...\n";
+//    int k = 15; // seed 길이
+//    int lsh_bit = 10;
+//    int D = error;
+//
+//    // Bloom filter 구버전
+////    int bloom_size = 1000000;
+////    Bloom bf(bloom_size, 4);
+//    
+//    // Bloom filter 신버전 -> size 최적화 설정
+//    size_t bloom_size = estimate_bloom_size(sequence.size(), 0.02);
+//    int hash_num = recommend_hash_num(bloom_size, sequence.size());
+//    FastBloom bf(bloom_size, hash_num);
+//
+//    // Bloom Filter 삽입
+//    for (size_t i=0; i+ k <= sequence.size(); ++i) {
+//        bf.add(sequence.substr(i, k));
+//    }
+//    
+//    // Reference의 모든 seed(부분문자열)를 LSH bucket에 저장
+//    /*
+//     LSH 설명 (부족하면 말씀해주세요) -> 유사한 seed들 후보 압축해서 시간 단축.
+//     seed 해시값의 상위 몇 비트만 “bucket(버킷)”에 저장하여, 비슷한 k-mer(seed)들이 같은 bucket에 모으기
+//     모든 seed를 hash→bucket에 위치 저장
+//     (예: lsh_table[버킷] = {seq위치1, seq위치2, ...})
+//     */
+//    
+//    // Reference의 모든 seed(부분문자열)를 LSH bucket에 저장
+//    unordered_map<size_t, vector<size_t>> lsh_table;
+//    for (size_t i=0; i+k <= sequence.size(); ++i) {
+//        string seed = sequence.substr(i, k);
+//        size_t bkt = lsh_hash(seed, lsh_bit);
+//        // (최대 후보군을 너무 늘리지 않게, 한 bucket당 100개까지만 저장)
+//        if (lsh_table[bkt].size()<100)
+//            lsh_table[bkt].push_back(i);
+//    }
+//    
+//    // 결과 파일 미리 open -> 파일형태로 출력
+//    ofstream file("result.txt");
+//    
+//    // ---- [3] 기존 read마다 Rabin-Karp 검색 + [확장] Bloom/LSH/BandDP 비교 ----
+//    for (const string& read : reads) {
+//        // 방어: 길이 k보다 짧으면 바로 skip!
+//        if (read.size() < k) {
+//            ++readIdx;
+//            continue;
+//        }
+//        bool found = false;
+//
+//        // --- 기존 해시테이블 기반 탐색 ---
+//        for (int i = 0; i < 10; i++) {
+//            if (i*10 + 10 >= read.size()) continue; //size() failed: string index out of bounds 오류해결
+//            string sub = read.substr(i * 10, 10);
+//            int hash = 0, Dval = 1;
+//            for (int j = 0; j < 9; j++) Dval = (Dval * d) % q;
+//            for (int j = 0; j < 10; j++) hash = (d * hash + sub[j]) % q;
+//
+//            if (hashTable.find(hash) != hashTable.end()) {
+//                for (int idx : hashTable[hash]) {
+//                    int start = idx - i * 10;
+//                    if (start < 0 || start + 100 > sequence.size()) continue;
+//
+//                    string candidate = sequence.substr(start, 100);
+//                    if (countError(read, candidate) != -1) {
+//                        resultTable[readIdx].push_back(start);
+//                        found = true;
+//                    }
+//                }
+//            }
+//            if(found) break;
+//        }
+//
+//        // --- Bloom+LSH+BandDP 기반 탐색 ----
+//        // Read의 각 seed를 LSH bucket에 해싱해서 후보군 추출
+//        if (!found) {
+//            for (int j=0; j+k<=read.size(); ++j) { //out of bound 오류 해결
+//                string seed = read.substr(j, k);
+//                if (!bf.possibly_contains(seed)) continue; // 블룸필터 1차 탈라
+//                size_t bkt = lsh_hash(seed, lsh_bit);
+//                if (lsh_table.find(bkt) == lsh_table.end()) continue;
+//                for (size_t refpos : lsh_table[bkt]) {
+//                    if (refpos + read.size() > sequence.size()) continue;
+//                    string refseg = sequence.substr(refpos, read.size());
+//                    int edist = banded_edit_distance(read, refseg, D); // BandDP 적용
+//                    if (edist <= D) {
+//                        // 결과를 오직 파일로만 출력
+//                        file << "확장: read#" << readIdx << " (" << read.substr(0,15) << "...)"
+//                             << " @Pos " << refpos << " 오차개수 =" << edist << "\n";
+//                        found = true;
+//                        resultTable[readIdx].push_back(refpos);
+//                        break;
+//                    }
+//                }
+//                if(found) break;
+//            }
+//        }
+//        readIdx++;
+//    }
+//
+//    file.close();
+//    cout << "전체 프로세스 완료!\n";
+//    
+//    return 0;
+//}
