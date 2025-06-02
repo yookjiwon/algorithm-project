@@ -1,1 +1,4 @@
-
+확장: read#1 (TCCCAAAGTGCTGGG...) @Pos 30 오차개수=0
+확장: read#2 (CACCACATCCAGCCC...) @Pos 60 오차개수=0
+확장: read#3 (GCAATGCTGGGATTA...) @Pos 1228 오차개수=4
+확장: read#4 (GGTTCAAGCAATTCT...) @Pos 1061 오차개수=0
