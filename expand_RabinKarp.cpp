@@ -15,7 +15,7 @@ using namespace std;
 const int d = 256;  // ASCII 문자 수
 const int q = 10000000;//큰 N
 const int error = 2; //허용 오차갯수 D
-//
+
 // 염기서열 읽어서 sequence에 저장 반환
 string readSequence(const string& fileName) {
     ifstream file(fileName);
