@@ -13,10 +13,9 @@
 using namespace std;
 
 const int d = 256;  // ASCII 문자 수
-const int q = 10000000;//큰 N <  mod 값
-int patternLength = 10; //자르는 길이
-const int error = 10; //허용 오차갯수 D
-
+const int q = 10000000;//큰 N
+const int error = 2; //허용 오차갯수 D
+//
 // 염기서열 읽어서 sequence에 저장 반환
 string readSequence(const string& fileName) {
     ifstream file(fileName);
@@ -138,10 +137,10 @@ size_t lsh_hash(const string &s, int lsh_bit=10) {
 
 // main
 int main() {
-    // [1]실행 시간 측정 시작
+    // 실행 시간 측정 시작
     clock_t start = clock();
 
-    // [2] 결과 저장을 위한 테이블/버퍼
+    // 결과 저장을 위한 테이블/버퍼
     unordered_map<int, vector<int>> resultTable; // read별 매칭 포지션 기록
     vector<string> result_buf; // 파일로 쓸 결과 문자열 버퍼
 
@@ -152,7 +151,7 @@ int main() {
     string sequence = readSequence(inputFile);
     vector<string> reads = readReads(readFile);
 
-    // [4] Bloom+LSH+BandDP 초기화
+    // 변수들 초기화
     int k = 15;            // seed(k-mer) 길이
     int lsh_bit = 10;      // LSH 해시 상위 비트 수(버킷 수=1024)
     int D = error;         // 허용 오차(편집거리)
@@ -168,7 +167,7 @@ int main() {
 
     // LSH 버킷수 설정
     #ifndef LSH_BUCKET_LIMIT
-    #define LSH_BUCKET_LIMIT 50    // 필요시 조정 (버킷 후보군 제한)
+    #define LSH_BUCKET_LIMIT 1000    // 필요시 조정 (버킷 후보군 제한)
     #endif
     
     unordered_map<size_t, vector<size_t>> lsh_table;
@@ -179,7 +178,7 @@ int main() {
             lsh_table[bkt].push_back(i);
     }
 
-    // [5] 각 read별로 Bloom+LSH+BandDP 매칭 시도
+    // 각 read별로 Bloom+LSH+BandDP 매칭 시도
     int readIdx = 0;
     for (const string& read : reads) {
         // read가 너무 짧으면 스킵 (seed k, 오차 D보다 짧을 때)
@@ -219,13 +218,13 @@ int main() {
         readIdx++;
     }
 
-    // [6] 결과 출력
+    // 결과 출력
     for (const auto& [readIdx, positions] : resultTable) {
         const string& read = reads[readIdx];
         string line = "read index: " + to_string(readIdx) + " -> positions: ";
         for (int pos : positions) {
             string refseg = sequence.substr(pos, read.size());
-            int edist = countError(read, refseg);
+            int edist = banded_edit_distance(read, refseg, D); // D-band로 오차 계산
             line += "(" + to_string(pos) + ",오차=" + to_string(edist) + ") ";
         }
         line += "\n";
@@ -239,7 +238,7 @@ int main() {
     }
     file.close();
 
-    // [마지막] 수행시간 출력
+    // 수행시간 출력
     clock_t finish = clock();
     double duration = double(finish - start) / CLOCKS_PER_SEC;
     cout << "전체 프로세스 완료!\n";
