@@ -9,12 +9,13 @@
 #include <ctime>
 #include <bitset>
 #include <cmath>
+#include <map>
 
 using namespace std;
 
 const int d = 256;  // ASCII 문자 수
 const int q = 10000000;//큰 N
-const int error = 2; //허용 오차갯수 D
+const int error = 9; //허용 오차갯수 D
 
 // 염기서열 읽어서 sequence에 저장 반환
 string readSequence(const string& fileName) {
@@ -141,13 +142,13 @@ int main() {
     clock_t start = clock();
 
     // 결과 저장을 위한 테이블/버퍼
-    unordered_map<int, vector<int>> resultTable; // read별 매칭 포지션 기록
+    map<int, vector<int>> resultTable; // read별 매칭 포지션 기록
     vector<string> result_buf; // 파일로 쓸 결과 문자열 버퍼
 
     // 입력(reference/read) 파일명 설정 및 데이터 로딩
     // Xcode 환경에서 경우 절대경로로 호출
-    string inputFile = "/Users/kosora/Documents/Xcode/C++/AlgorithmProject/AlgorithmProject/smallinput.txt";
-    string readFile = "/Users/kosora/Documents/Xcode/C++/AlgorithmProject/AlgorithmProject/smallread.txt";
+    string inputFile = "/Users/kosora/Documents/Xcode/C++/AlgorithmProject/AlgorithmProject/1M.fa";
+    string readFile = "/Users/kosora/Documents/Xcode/C++/AlgorithmProject/AlgorithmProject/1M_reads.txt";
     string sequence = readSequence(inputFile);
     vector<string> reads = readReads(readFile);
 
@@ -181,19 +182,35 @@ int main() {
     // 각 read별로 Bloom+LSH+BandDP 매칭 시도
     int readIdx = 0;
     for (const string& read : reads) {
-        // read가 너무 짧으면 스킵 (seed k, 오차 D보다 짧을 때)
         if (read.size() < k || read.size() < D) {
             ++readIdx;
             continue;
         }
-        // BandDP를 통과한 후보 위치만 resultTable에 기록
-        bool found = false;
+        
+        bool skip_read = true;
+        
         for (int j = 0; j + k <= read.size(); ++j) {
             string seed = read.substr(j, k);
-            if (!bf.possibly_contains(seed)) continue;             // Bloom filter 1차 필터링
+            if (bf.possibly_contains(seed)) {
+                skip_read = false;
+                break;
+            }
+        }
+        
+        if (skip_read) {
+            ++readIdx;
+            continue;
+        } // 후보 seed 하나도 없으면 해당 read 완전 스킵
+        
+        // BandDP를 통과한 후보 위치만 resultTable에 기록
+        bool found = false;
+        for (int j = 0; j + k <= read.size() && !found; ++j) {
             
+            string seed = read.substr(j, k);
+            if (!bf.possibly_contains(seed)) continue; // Bloom filter 1차 필터링
+
             size_t bkt = lsh_hash(seed, lsh_bit);
-            if (lsh_table.find(bkt) == lsh_table.end()) continue;  // LSH bucket 필터링
+            if (lsh_table.find(bkt) == lsh_table.end()) continue; // LSH bucket 필터링
             
             // 버킷에 있는 모든 후보(reference 위치)에서 BandDP 실행
             for (size_t refpos : lsh_table[bkt]) {
@@ -203,17 +220,15 @@ int main() {
                 // BandDP를 D/2 band로 먼저 시도, 실패시 D로 확장
                 // 과제를 해결하는데 있어 D가 1이라면 기존 라빈카프 countError 함수방식과 동일.
                 int edist = banded_edit_distance(read, refseg, D / 2);
-                if (edist > D) {
+                if (edist > D)
                     edist = banded_edit_distance(read, refseg, D);
-                }
-
                 if (edist <= D) {
                     resultTable[readIdx].push_back(refpos);
                     found = true;
-                    break;
+                    break; // 후보군 중 첫 매칭만 결과로 기록, 즉시 내부 루프 탈출
                 }
             }
-            if (found) break;
+            if(found) break;
         }
         readIdx++;
     }
